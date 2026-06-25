@@ -1,5 +1,33 @@
+Environments and Secrets
+
 venv/
+env/
+.env
+.env.local
+
+Cloned Data Repositories
+
 wstg/
 www-project-top-ten/
 attack-stix-data/
-.env
+
+Python Cache
+
+pycache/
+*.pyc
+*.pyo
+
+J.A.R.V.I.S. Temporary Files
+
+temp_speech.wav
+temp_speech.mp3
+skills/temp_agent_script.py
+
+Local Databases (CRITICAL: Do not push massive vector databases!)
+
+brain/chroma_db/
+
+OS generated files
+
+.DS_Store
+Thumbs.db

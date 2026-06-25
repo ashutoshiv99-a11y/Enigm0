@@ -6,7 +6,11 @@ import threading
 import subprocess
 import speech_recognition as sr
 import pyautogui
+from dotenv import load_dotenv
 from groq import Groq
+
+# Load environment variables from the hidden .env file
+load_dotenv()
 
 # --- IMPORTING ALL JARVIS MODULES ---
 from senses.voice import NeuralVoice
@@ -28,8 +32,9 @@ except ImportError:
     memory_core = DummyMemory()
 
 # --- CRITICAL API KEYS ---
-GROQ_API_KEY = "YOUR_API_KEY_HERE"  # PASTE GROQ KEY
-TELEGRAM_BOT_TOKEN = "8810545988:AAF6sOnQAl9s3KJ0d4wn8-Rxcs4Iqnm--lM"  # PASTE TELEGRAM TOKEN
+# Now pulling safely from your .env file!
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 client = Groq(api_key=GROQ_API_KEY)
 voice_engine = NeuralVoice()

@@ -1,11 +1,21 @@
-from pymongo import MongoClient
 import os
+from pymongo import MongoClient
+from dotenv import load_dotenv
 
-# --- PASTE YOUR MONGODB ATLAS CONNECTION STRING HERE ---
-MONGO_URI = "mongodb+srv://Ashutosh_99:<Ankita909090>@cluster0.iiz0yoy.mongodb.net/?appName=Cluster0"
+# Load environment variables from the .env file
+load_dotenv()
+
+# Fetch the URI securely from the environment
+MONGO_URI = os.getenv("MONGO_URI")
 
 def search_nvd_database(query):
     """Searches the cloud MongoDB database for vulnerabilities."""
+    
+    # Safety check: Ensure the URI was actually loaded
+    if not MONGO_URI:
+        print("[!] Error: MONGO_URI environment variable not found. Check your .env file.")
+        return "Database configuration error."
+
     print(f"[*] Querying MongoDB Atlas Threat Intel for: '{query}'...")
     
     try:
@@ -27,7 +37,6 @@ def search_nvd_database(query):
                 return f"No records found for {cve_id} in the database."
 
         # 2. Otherwise, do a text/regex search for keywords (e.g., "Log4j", "Windows 10 exploit")
-        # Using the $regex search you built in your CLI engine!
         results = collection.find({
             "$or": [
                 {"cve.descriptions.value": {"$regex": query, "$options": "i"}},

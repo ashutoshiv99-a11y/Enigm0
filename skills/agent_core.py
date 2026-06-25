@@ -2,10 +2,14 @@ import subprocess
 import json
 import os
 import re
+from dotenv import load_dotenv
 from groq import Groq
 
-# --- PASTE YOUR GROQ API KEY HERE ---
-GROQ_API_KEY = "YOUR_API_KEY_HERE"
+# Load environment variables from the hidden .env file
+load_dotenv()
+
+# --- PULL GROQ API KEY SAFELY FROM .ENV ---
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 client = Groq(api_key=GROQ_API_KEY)
 
 def execute_dynamic_task(task_description):

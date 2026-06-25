@@ -1,17 +1,22 @@
+import os
 import requests
 import time
 import certifi
 import urllib.parse
+from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 from pymongo import MongoClient, UpdateOne
 
+# Load environment variables from the hidden .env file
+load_dotenv()
+
 # ==========================================
-# CONFIGURATION - PUT YOUR CREDENTIALS HERE
+# CONFIGURATION - SECURED VIA .ENV
 # ==========================================
-MONGO_USERNAME = "Ashutosh_99"
-MONGO_PASSWORD = "Ankita909090"
-MONGO_CLUSTER = "cluster0.iiz0yoy.mongodb.net" # Example: cluster0.abcde.mongodb.net
-NVD_API_KEY = "4145334a-4b84-48f1-95fd-4738213dc0d0"
+MONGO_USERNAME = os.getenv("MONGO_USERNAME")
+MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
+MONGO_CLUSTER = os.getenv("MONGO_CLUSTER")
+NVD_API_KEY = os.getenv("NVD_API_KEY")
 
 # Securely parse credentials
 escaped_user = urllib.parse.quote_plus(MONGO_USERNAME)

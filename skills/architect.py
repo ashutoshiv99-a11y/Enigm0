@@ -1,16 +1,19 @@
 import os
 import re
-from dotenv import load_dotenv
 from groq import Groq
+from dotenv import load_dotenv
 
-# Load environment variables from the hidden .env file
+# --- SECURELY LOAD API KEYS ---
+# This automatically reads your .env file so keys are never hardcoded!
 load_dotenv()
-
-# --- PULL GROQ API KEY SAFELY FROM .ENV ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+if not GROQ_API_KEY:
+    print("[!] ERROR: GROQ_API_KEY is missing from your .env file!")
+
 client = Groq(api_key=GROQ_API_KEY)
 
-def self_evolve(upgrade_request):
+def evolve_system(upgrade_request):
     """Allows J.A.R.V.I.S. to write new permanent modules or edit his own source code."""
     print(f"\n[***] SYSTEM ARCHITECT ENGAGED [***]")
     print(f"[*] Analyzing Upgrade Request: '{upgrade_request}'")
@@ -47,7 +50,7 @@ def self_evolve(upgrade_request):
     )
     
     if existing_code_context:
-        system_prompt += f"\n\nThe user wants to modify {target_file}. Here is the current source code for it. Rewrite the ENTIRE file with the requested fix/upgrade:\n\n{existing_code_context}"
+        system_prompt += f"\n\nNote: The user wants to modify {target_file}. Here is the current source code for it. Rewrite the ENTIRE file with the requested fix/upgrade:\n\n{existing_code_context}"
 
     try:
         completion = client.chat.completions.create(
@@ -86,4 +89,4 @@ def self_evolve(upgrade_request):
 
 # Quick Test
 if __name__ == "__main__":
-    print(self_evolve("Write a new skill module that can download a youtube video given a URL."))
+    print(evolve_system("Write a new skill module that can download a youtube video given a URL."))

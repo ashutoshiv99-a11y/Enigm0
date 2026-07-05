@@ -1,20 +1,47 @@
 import os
 import sys
+import atexit
 import time
 import json
 import threading
 import subprocess
+import uuid
+import io # <--- NEW: For RAM-based audio processing
 import speech_recognition as sr
 import pyautogui
-from dotenv import load_dotenv
 from groq import Groq
+from dotenv import load_dotenv
 
-# Load environment variables from the hidden .env file
-load_dotenv()
+# --- FILE LOCK: PREVENT TELEGRAM 409 CONFLICT ERRORS ---
+LOCK_FILE = "jarvis_bot.lock"
+
+def create_lock():
+    """Prevents multiple instances of J.A.R.V.I.S. from running simultaneously."""
+    if os.path.exists(LOCK_FILE):
+        print("\n[!] CRITICAL ERROR: J.A.R.V.I.S. is already running in the background!")
+        print("[!] Please close the existing instance or check Task Manager for 'pythonw.exe'.")
+        sys.exit(1)
+    with open(LOCK_FILE, "w") as f:
+        f.write(str(os.getpid()))
+
+def remove_lock():
+    """Removes the lock file when J.A.R.V.I.S. shuts down normally."""
+    if os.path.exists(LOCK_FILE):
+        os.remove(LOCK_FILE)
+
+create_lock()
+atexit.register(remove_lock)
+
+# --- NEW IMPORTS FOR MILLISECOND WAKE WORD ---
+import openwakeword
+from openwakeword.model import Model
+import pyaudio
+import numpy as np
 
 # --- IMPORTING ALL JARVIS MODULES ---
 from senses.voice import NeuralVoice
 from senses.mobile_bridge import TelegramBridge
+from senses.omni_logger import OmniLogger
 from brain.vision import AssistantVision
 from brain.cyber_search import search_threat_intelligence
 from brain.cve_bridge import search_nvd_database
@@ -22,7 +49,6 @@ from skills.api_tools import route_api_request
 from skills.agent_core import execute_dynamic_task
 from skills.architect import evolve_system
 
-# Memory Core (Mocked gracefully if not fully built yet, otherwise imports your real memory module)
 try:
     from brain.memory import memory_core
 except ImportError:
@@ -31,13 +57,17 @@ except ImportError:
         def memorize(self, fact): return "Fact saved."
     memory_core = DummyMemory()
 
-# --- CRITICAL API KEYS ---
-# Now pulling safely from your .env file!
+# --- SECURE API KEYS VIA .ENV ---
+load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
+if not GROQ_API_KEY:
+    print("[!] WARNING: GROQ_API_KEY not found in .env file!")
+
 client = Groq(api_key=GROQ_API_KEY)
 voice_engine = NeuralVoice()
+omni_logger = OmniLogger()
 
 # Initialize Vision
 try:
@@ -53,50 +83,97 @@ def speak(text):
     """Global speak function accessible by UI and modules."""
     voice_engine.speak(text)
 
-# --- THE EARS (Ghost Loop & Whisper) ---
+# --- THE EARS (Hardware Wake Word) ---
 def wait_for_wake_word():
-    """Silently listens in the background for 'Jarvis'."""
+    """Offline, millisecond-precise wake word detection using OpenWakeWord (100% Free)."""
+    try:
+        print("\n[Zzz...] Loading OpenWakeWord Model...")
+        owwModel = Model(wakeword_models=['hey_jarvis'])
+        
+        FORMAT = pyaudio.paInt16
+        CHANNELS = 1
+        RATE = 16000
+        CHUNK = 1280
+        
+        audio = pyaudio.PyAudio()
+        mic_stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+
+        print("\n[Zzz...] Hardware Ghost Loop Active. Say 'Hey Jarvis' to wake me...")
+
+        while True:
+            # Read audio chunk locally
+            pcm = mic_stream.read(CHUNK, exception_on_overflow=False)
+            audio_data = np.frombuffer(pcm, dtype=np.int16)
+            
+            # Process locally (NO INTERNET, NO API KEYS REQUIRED)
+            prediction = owwModel.predict(audio_data)
+            
+            # Check if 'hey_jarvis' was detected with high confidence (Lowered to 0.40 for better hearing)
+            for model_name, score in prediction.items():
+                if score > 0.35: # LOWERED TO 0.35 FOR MAXIMUM WAKE WORD SENSITIVITY
+                    print(f"\n[!] WAKE WORD DETECTED [!]")
+                    mic_stream.stop_stream()
+                    mic_stream.close()
+                    audio.terminate()
+                    return True
+
+    except Exception as e:
+        print(f"[!] OpenWakeWord Error: {e}")
+        return _fallback_wake_word()
+
+def _fallback_wake_word():
+    """The old, slower Google Web API wake word method."""
     recognizer = sr.Recognizer()
     with sr.Microphone() as source:
         recognizer.adjust_for_ambient_noise(source, duration=1)
-        print("\n[Zzz...] Ghost Loop Active. Waiting for wake word ('Jarvis')...")
+        print("\n[Zzz...] Ghost Loop Active (Google API). Waiting for 'Jarvis'...")
         while True:
             try:
                 audio = recognizer.listen(source, timeout=None, phrase_time_limit=3)
-                print("[*] Analyzing audio spike...")
                 text = recognizer.recognize_google(audio).lower()
                 if "jarvis" in text:
                     return True
             except sr.UnknownValueError:
                 pass 
-            except sr.RequestError as e:
-                print(f"[!] Network error during wake word detection: {e}")
+            except sr.RequestError:
                 time.sleep(2)
 
 def listen_for_command():
-    """Uses Groq Whisper API for flawless voice recognition."""
+    """Uses Groq Whisper API for flawless voice recognition, running entirely in RAM."""
     recognizer = sr.Recognizer()
-    recognizer.pause_threshold = 2.0  # Waits 2 full seconds of silence so you can pause and think!
+    
+    # 1. Faster Cutoff: Stop listening just 0.8 seconds after the user stops speaking
+    recognizer.pause_threshold = 0.8  
+    # 2. Dynamic Noise Filter: Automatically adjust to AC/fan/background noise
+    recognizer.dynamic_energy_threshold = True 
     
     with sr.Microphone() as source:
         print("\n[>>>] J.A.R.V.I.S. IS LISTENING... [<<<]")
+        
+        # Quickly sample the room's background noise for 0.5 seconds to filter it out
+        recognizer.adjust_for_ambient_noise(source, duration=0.5)
+        
         try:
-            audio = recognizer.listen(source, timeout=8, phrase_time_limit=30)
-            print("[*] Processing audio with Whisper-Large-v3...")
+            # 3. phrase_time_limit=15 prevents him from listening forever if a TV is playing
+            audio = recognizer.listen(source, timeout=5, phrase_time_limit=15)
+            print("[*] Processing audio in RAM with Whisper-Large-v3...")
             
-            with open("temp_speech.wav", "wb") as f:
-                f.write(audio.get_wav_data())
+            # 4. RAM Processing: DO NOT save to hard drive. Process directly in memory!
+            wav_data = audio.get_wav_data()
+            audio_file = io.BytesIO(wav_data)
+            audio_file.name = "speech.wav" # Groq API requires a virtual filename
             
-            with open("temp_speech.wav", "rb") as file:
-                transcription = client.audio.transcriptions.create(
-                  file=("temp_speech.wav", file.read()),
-                  model="whisper-large-v3",
-                  prompt="The user is speaking to their highly intelligent AI assistant J.A.R.V.I.S.",
-                )
+            transcription = client.audio.transcriptions.create(
+              file=audio_file,
+              model="whisper-large-v3",
+              prompt="The user is speaking to their highly intelligent AI assistant J.A.R.V.I.S. Filter out background noise and ignore TV sounds.",
+              temperature=0.0, # 0.0 makes the AI highly focused and prevents hallucinated words
+              language="en" # Forces English to prevent translating background noise into random languages
+            )
             
             text = transcription.text.strip()
             print(f"[User]: {text}")
-            active_chat_history.append(f"User: {text}") # Save for Deep Sleep
+            active_chat_history.append(f"User: {text}") 
             return text
             
         except (sr.WaitTimeoutError, sr.UnknownValueError):
@@ -109,6 +186,7 @@ def listen_for_command():
 def ask_local_ai(user_command):
     global active_chat_history
     past_context = memory_core.recall_memory(user_command)
+    current_activity = omni_logger.get_recent_context()
     
     system_instruction = (
         "You are J.A.R.V.I.S., a hyper-intelligent, autonomous AI assistant. "
@@ -124,7 +202,8 @@ def ask_local_ai(user_command):
         "7. CYBERSECURITY/HACKING CONCEPTS (OWASP/MITRE): action='cyber', target=question. "
         "8. SPECIFIC VULNERABILITIES (NVD/CVSS): action='cve', target=query. "
         "9. General Conversation / Advice: action='chat', target=your conversational response. "
-        f"Relevant permanent memory: {past_context}"
+        f"Relevant permanent memory: {past_context}\n"
+        f"User's CURRENT live PC activity (Omni-Logger): {current_activity}"
     )
     
     try:
@@ -151,27 +230,20 @@ def execute_command(ai_response):
     action = ai_response.get("action")
     target = ai_response.get("target")
     
-    # 1. API & Web Search
     if action == "api":
         response = route_api_request(target)
         active_chat_history.append(f"JARVIS: {response}")
         return response
-    
-    # 2. Agent Core (PC Control)
     elif action == "agent":
         speak("Executing dynamic task...")
         response = execute_dynamic_task(target)
         active_chat_history.append(f"JARVIS: {response}")
         return response
-    
-    # 3. Architect Core (Self-Evolution)
     elif action == "evolve":
         speak("Initiating Architect Core. Designing system upgrade...")
         response = evolve_system(target)
         active_chat_history.append(f"JARVIS: {response}")
         return response
-        
-    # 4. Vision Core
     elif action == "vision":
         speak("Accessing optical sensors...")
         if vision_core:
@@ -179,8 +251,6 @@ def execute_command(ai_response):
             active_chat_history.append(f"JARVIS: {response}")
             return response
         return "My vision module is offline."
-        
-    # 5. Cyber Intelligence (Local ChromaDB)
     elif action == "cyber":
         speak("Accessing Threat Intelligence database...")
         intel_data = search_threat_intelligence(target)
@@ -194,8 +264,6 @@ def execute_command(ai_response):
         response = analysis_completion.choices[0].message.content
         active_chat_history.append(f"JARVIS: {response}")
         return response
-        
-    # 6. Cloud CVE Database (MongoDB)
     elif action == "cve":
         speak("Querying cloud vulnerability database...")
         cve_data = search_nvd_database(target)
@@ -209,8 +277,6 @@ def execute_command(ai_response):
         response = analysis_completion.choices[0].message.content
         active_chat_history.append(f"JARVIS: {response}")
         return response
-        
-    # 7. Basic Actions
     elif action == "chat":
         active_chat_history.append(f"JARVIS: {target}")
         return target
@@ -219,10 +285,7 @@ def execute_command(ai_response):
         return "I have committed that to my permanent memory."
     elif action == "open":
         try:
-            if "http" in target or ".com" in target:
-                os.system(f"start {target}")
-            else:
-                os.system(f"start {target}")
+            os.system(f"start {target}")
             return f"Opening {target}."
         except:
             return f"Failed to open {target}."
@@ -234,7 +297,6 @@ def execute_command(ai_response):
 
 # --- DEEP SLEEP SYNTHESIS (Self-Learning) ---
 def synthesize_memory():
-    """Reads the current session's chat history and extracts permanent facts."""
     global active_chat_history
     if len(active_chat_history) < 2:
         return
@@ -262,23 +324,21 @@ def synthesize_memory():
     except Exception as e:
         print(f"[!] Synthesis Error: {e}")
         
-    # Clear history for the next session
     active_chat_history = []
 
 # --- BACKGROUND SERVICES ---
 def start_background_services():
     """Starts the Telegram Mobile Bridge invisibly."""
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_TOKEN != "your_telegram_bot_token_here":
+    omni_logger.start()
+    if TELEGRAM_BOT_TOKEN:
         try:
             telegram_bridge = TelegramBridge(TELEGRAM_BOT_TOKEN, ask_local_ai, execute_command)
-            # Run the bridge in a daemon thread so it doesn't block the UI
-            bridge_thread = threading.Thread(target=telegram_bridge.start_polling, daemon=True)
-            bridge_thread.start()
+            telegram_bridge.run_in_background() 
             print("[*] Mobile Bridge Online. Telegram bot listening in background.")
         except Exception as e:
             print(f"[!] Mobile Bridge failed to start: {e}")
 
-# --- MAIN LOOP (Terminal Fallback if UI is not used) ---
+# --- MAIN LOOP (Terminal Fallback) ---
 def main():
     start_background_services()
     speak("System is online. Master core operational.")

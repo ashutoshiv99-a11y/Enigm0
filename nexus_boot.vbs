@@ -1,1 +1,3 @@
-Set objFSO = CreateObject("Scripting.FileSystemObject")Set WshShell = CreateObject("WScript.Shell")' Automatically detect the exact folder this script is sitting instrScriptFolder = objFSO.GetParentFolderName(WScript.ScriptFullName)' Run the API Server (which automatically imports and runs the Master Brain and Wake Word) INVISIBLYstrCommand = "cmd /c cd /d """ & strScriptFolder & """ && venv\Scripts\pythonw.exe api_server.py"' 0 = Complete invisibility. No terminal will ever appear.WshShell.Run strCommand, 0, False
+Set WshShell = CreateObject("WScript.Shell")
+strCommand = "cmd /c cd /d ""C:\Users\ashut\Enigm0"" && venv\Scripts\pythonw.exe api_server.py"
+WshShell.Run strCommand, 0, False

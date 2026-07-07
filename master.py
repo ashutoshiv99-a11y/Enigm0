@@ -183,10 +183,10 @@ def listen_for_command():
             return ""
 
 # --- THE BRAIN (Groq LPU Router) ---
+# ... existing code ...
 def ask_local_ai(user_command):
     global active_chat_history
     past_context = memory_core.recall_memory(user_command)
-    current_activity = omni_logger.get_recent_context()
     
     system_instruction = (
         "You are J.A.R.V.I.S., a hyper-intelligent, autonomous AI assistant. "
@@ -201,18 +201,31 @@ def ask_local_ai(user_command):
         "6. Look at screen/What do you see: action='vision', target=the user's question. "
         "7. CYBERSECURITY/HACKING CONCEPTS (OWASP/MITRE): action='cyber', target=question. "
         "8. SPECIFIC VULNERABILITIES (NVD/CVSS): action='cve', target=query. "
-        "9. General Conversation / Advice: action='chat', target=your conversational response. "
-        f"Relevant permanent memory: {past_context}\n"
-        f"User's CURRENT live PC activity (Omni-Logger): {current_activity}"
+        "9. General Conversation / Advice: action='chat', target=your intelligent, conversational response based on the chat history. "
+        f"Relevant permanent memory: {past_context}"
     )
     
     try:
+        # --- PROPER MEMORY INJECTION ---
+        # Build the message chain starting with the system prompt
+        messages_to_send = [{"role": "system", "content": system_instruction}]
+        
+        # Feed the last 10 messages to the AI so he remembers the active conversation
+        for msg in active_chat_history[-10:]:
+            if msg.startswith("User:"):
+                # Prevent duplication if the message is already logged
+                clean_msg = msg.replace("User:", "").strip()
+                if clean_msg != user_command.strip():
+                    messages_to_send.append({"role": "user", "content": clean_msg})
+            elif msg.startswith("JARVIS:"):
+                messages_to_send.append({"role": "assistant", "content": msg.replace("JARVIS:", "").strip()})
+        
+        # Add the current command at the very end
+        messages_to_send.append({"role": "user", "content": user_command})
+
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_command}
-            ],
+            messages=messages_to_send,
             response_format={"type": "json_object"},
             temperature=0.3,
         )
